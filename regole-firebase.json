@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "utenti_autorizzati": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "personale": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid && root.child('utenti_autorizzati').child($uid).val() === true",
+        ".write": "auth != null && auth.uid === $uid && root.child('utenti_autorizzati').child($uid).val() === true"
+      }
+    }
+  }
+}
