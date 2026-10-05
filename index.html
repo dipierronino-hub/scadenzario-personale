@@ -7,6 +7,13 @@
   <meta name="referrer" content="no-referrer">
   <meta name="theme-color" content="#0f766e">
   <title>Scadenzario Personale</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#6d28d9">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Scadenze">
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -70,7 +77,7 @@
     .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
     .brand b { display: block; font-size: 1rem; }
     .brand small { display: block; font-size: .75rem; }
-    .logo { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #a78bfa, #6d28d9); color: #fff; font-weight: 800; font-size: 18px; flex: none; }
+    .logo { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #7c3aed, #3b0764); color: #e8be5a; font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; font-size: 18px; flex: none; }
     .nav { display: flex; gap: 4px; margin: 0 auto; }
     .nav button { display: flex; align-items: center; gap: 6px; border: 0; background: none; padding: 8px 14px; border-radius: 10px; cursor: pointer; color: var(--muted); font-weight: 600; font-size: .9rem; }
     .nav button:hover { background: var(--surface-2); }
@@ -255,7 +262,7 @@
 <!-- ================= LOGIN ================= -->
 <div id="loginScreen" class="login">
   <form id="loginForm" class="login-box" autocomplete="on">
-    <div class="logo">€</div>
+    <div class="logo">N</div>
     <h2>Scadenzario Personale</h2>
     <p class="sub">Accesso riservato</p>
     <label>Email
@@ -276,7 +283,7 @@
   <header class="top">
     <div class="top-in">
       <div class="brand">
-        <div class="logo">€</div>
+        <div class="logo">N</div>
         <div><b>Scadenzario Personale</b><small>Le mie scadenze private</small></div>
       </div>
       <nav class="nav" id="nav">
@@ -1845,6 +1852,11 @@ try {
   ['scadenziario_items', 'scad_pin_hash', 'scad_bio_enabled'].forEach(k => localStorage.removeItem(k));
   sessionStorage.removeItem('scad_unlocked');
 } catch (e) {}
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
 </script>
 </body>
 </html>
