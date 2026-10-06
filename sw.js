@@ -1,7 +1,7 @@
 // Service worker minimo: rende l'app installabile e apribile anche con rete assente.
 // La pagina viene sempre presa da Internet se possibile (così gli aggiornamenti arrivano subito);
 // i dati restano su Firebase e non vengono mai salvati qui.
-const CACHE = 'scadp-v3';
+const CACHE = 'scadp-v4';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));

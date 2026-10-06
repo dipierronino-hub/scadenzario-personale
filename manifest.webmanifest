@@ -1,8 +1,9 @@
 {
   "name": "Scadenzario Personale",
-  "short_name": "Scadenze",
+  "short_name": "Personale",
   "description": "Le mie scadenze private",
   "lang": "it",
+  "id": "scadenze-personali",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
