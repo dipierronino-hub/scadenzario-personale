@@ -6,9 +6,9 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <title>Scadenzario Personale</title>
-  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#6d28d9">
-  <link rel="icon" href="icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Personale">
@@ -654,6 +654,12 @@
         </div>
         <p class="hint">Per sicurezza l'app ti fa uscire dopo 15 minuti di inattività.</p>
       </div>
+
+    <div class="card">
+      <div class="card-h"><h3>App sul computer e sul telefono</h3></div>
+      <p id="infoInstalla" style="margin:0 0 10px;"></p>
+      <button class="btn btn-primary" id="btnInstalla2" hidden>⬇ Installa Scadenzario sul computer</button>
+    </div>
     </section>
   </main>
 
@@ -2699,8 +2705,36 @@ $('btnMigraComm').addEventListener('click', async () => {
 });
 </script>
 <script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+// INSTALLAZIONE COME APP (PC e telefono) — stessa logica dello Scadenzario Generale
+let promptInstalla = null;
+const installata = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+function aggiornaInfoInstalla() {
+  const pronto = !!promptInstalla && !installata();
+  const b1 = document.getElementById('btnInstalla2');
+  if (b1) b1.hidden = !pronto;
+  const ua = navigator.userAgent;
+  let txt;
+  if (installata()) txt = '✅ Stai già usando lo Scadenzario Personale come app installata.';
+  else if (pronto) txt = 'Installala per aprirla dal menu Start o dalla barra delle applicazioni, in una finestra sua.';
+  else if (/iPhone|iPad/.test(ua)) txt = 'Su iPhone: tocca Condividi ⬆️ in Safari e poi "Aggiungi alla schermata Home".';
+  else if (/Firefox/.test(ua)) txt = 'Firefox non installa le app web: apri questo indirizzo con Chrome o Edge e premi "Installa".';
+  else txt = 'In Chrome o Edge cerca l\'icona di installazione (un monitor con la freccia ⬇) a destra nella barra degli indirizzi, oppure Menu ⋮ → "Trasmetti, salva e condividi" → "Installa pagina come app".';
+  const info = document.getElementById('infoInstalla');
+  if (info) info.textContent = txt;
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); promptInstalla = e; aggiornaInfoInstalla(); });
+window.addEventListener('appinstalled', () => { promptInstalla = null; aggiornaInfoInstalla(); });
+async function installa() {
+  if (!promptInstalla) return;
+  promptInstalla.prompt();
+  await promptInstalla.userChoice;
+  promptInstalla = null;
+  aggiornaInfoInstalla();
+}
+document.getElementById('btnInstalla2').addEventListener('click', installa);
+aggiornaInfoInstalla();
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker non registrato', err));
 }
 </script>
 </body>
