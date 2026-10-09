@@ -132,6 +132,9 @@
     /* ---------- PROMEMORIA ---------- */
     .alert { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; margin-bottom: 12px; flex-wrap: wrap; }
     .alert-red { background: var(--red-soft); color: var(--red); }
+    .alert-amber { background: rgba(245, 158, 11, .14); color: #b45309; }
+    @media (prefers-color-scheme: dark) { .alert-amber { color: #fbbf24; } }
+    :root[data-theme="dark"] .alert-amber { color: #fbbf24; }
     .alert-ok { background: var(--green-soft); color: var(--green); }
     .alert .btn { margin-left: auto; }
     .pr-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -166,6 +169,7 @@
     th { position: sticky; top: 0; background: var(--surface-2); color: var(--muted); font-weight: 700; font-size: .74rem; text-transform: uppercase; letter-spacing: .02em; text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
     td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
     tr:last-child td { border-bottom: 0; }
+    tbody tr.zebra td { background: var(--surface-2); }
     tbody tr:hover td { background: var(--surface-2); }
     tr.sel td { background: var(--primary-soft) !important; }
     tr.pagata td { color: var(--muted); }
@@ -293,7 +297,7 @@
     <div class="top-in">
       <div class="brand">
         <div class="logo">€</div>
-        <div><b>Scadenzario Personale</b><small>v15 · Smart Match & RCA Pro</small></div>
+        <div><b>Scadenzario Personale</b><small>v16 · Smart Match & RCA Pro</small></div>
       </div>
       <nav class="nav" id="nav">
         <button data-view="scadenze" class="active" aria-label="Vista Scadenze"><span>📅</span>Scadenze</button>
@@ -350,6 +354,8 @@
       </div>
 
       <div class="card" id="promemoria"></div>
+
+      <div class="card" id="sommaMensile" hidden></div>
 
       <div class="card">
         <div class="toolbar">
@@ -452,6 +458,7 @@
           <button class="chip active" data-sub="singola">🗓️ Nuova scadenza</button>
           <button class="chip ai" data-sub="ai">🪄 Scansione AI</button>
           <button class="chip" data-sub="pdf">📄 Cartella AdER da PDF</button>
+          <button class="chip" data-sub="mutuo">🏦 Mutuo da PDF</button>
           <button class="chip" data-sub="manuale">📋 Incolla tabella</button>
           <button class="chip" data-sub="modulo">🧾 Modulo di pagamento</button>
           <button class="chip" data-sub="quietanza">✅ Quietanza PagoPA</button>
@@ -592,6 +599,17 @@
           <div id="statusImport" class="hint" style="font-weight:600;"></div>
         </div>
 
+        <div id="sub-mutuo" hidden>
+          <p class="hint" style="margin-top:0;">Carica il PDF del piano di ammortamento del mutuo: l'app crea una rata per ogni scadenza (capitale, interessi, debito residuo) e archivia il PDF nell'Archivio. Il file viene letto solo sul tuo dispositivo.</p>
+          <div class="grid-form" style="margin-bottom:10px;">
+            <div><label class="f" for="mutuoPagateFino">Rate già pagate fino alla n. (facoltativo)</label>
+              <input type="number" id="mutuoPagateFino" min="0" max="999" step="1" placeholder="Es. 51"></div>
+          </div>
+          <div class="row"><button class="btn btn-primary" id="btnMutuoPdf">📄 Carica PDF piano di ammortamento</button></div>
+          <input type="file" id="importMutuoFile" accept=".pdf" hidden>
+          <div id="statusMutuo" class="hint" style="font-weight:600;"></div>
+        </div>
+
         <div id="sub-modulo" hidden>
           <div class="drop" id="dropModulo">
             <div style="font-size:2rem;">🧾</div>
@@ -656,6 +674,7 @@
           <div class="row" style="margin-top:10px;">
             <button class="btn btn-primary" id="btnRinomina">Salva nome</button>
             <button class="btn btn-ghost" id="btnIcsPiano">📅 Scadenze aperte nel calendario</button>
+            <button class="btn btn-ghost" id="btnPdfPiano" hidden>📄 PDF piano di ammortamento</button>
             <button class="btn btn-danger" id="btnEliminaPiano">Elimina tutto il gruppo</button>
           </div>
         </div>
@@ -813,7 +832,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v15';
+const VERSIONE = 'v16';
 const MINUTI_INATTIVITA = 15;
 const MODELLO_AI_DEFAULT = 'gemini-3.5-flash-lite';
 const MAX_MB_AI = 15;
@@ -840,6 +859,11 @@ const CATEGORIE = [
   { k: 'Altro', i: '📌', rif: 'Riferimento', es: 'Descrizione', ric: 0 }
 ];
 const ICONA_ADER = '📑';
+const ICONA_MUTUO = '🏦';
+const CAT_MUTUO = 'Mutuo';
+const BANCA_ADDEBITO_MUTUI = 'BANCA POPOLARE PUGLIESE'; // conto da cui vengono addebitate le rate dei mutui
+const MUTUO_PDF_MAX_BYTES = 600 * 1024; // il PDF del piano viene archiviato (una sola copia) solo se non supera questa dimensione
+function isMutuo(it) { return !isVaria(it) && it.categoria === CAT_MUTUO; }
 const QUANTE_DEFAULT = { 1: 12, 2: 6, 3: 4, 6: 2, 12: 1, 24: 1 };
 
 /* =====================================================================
@@ -946,7 +970,9 @@ function normalizza(r) {
     ente: String(r.ente || ''),
     ricorrenzaMesi: Number(r.ricorrenzaMesi) || 0,
     serie: r.serie ? String(r.serie) : null,
-    veicolo: normalizzaVeicolo(r.veicolo)
+    veicolo: normalizzaVeicolo(r.veicolo),
+    pianoPdf: r.pianoPdf && typeof r.pianoPdf === 'object' ? r.pianoPdf : null,
+    debitoResiduo: r.debitoResiduo === null || r.debitoResiduo === undefined || r.debitoResiduo === '' ? null : num2(r.debitoResiduo)
   };
 }
 // Dati del veicolo salvati con il bollo: permettono di ricalcolare l'anno dopo partendo dalla sola targa
@@ -1158,14 +1184,16 @@ function statoInfo(it) {
 function mappaPiani() {
   const m = {};
   lista().forEach(it => {
-    const k = pianoKey(it), varia = isVaria(it);
+    const k = pianoKey(it), varia = isVaria(it), mutuo = isMutuo(it);
     if (!m[k]) m[k] = {
-      id: k, varia, icona: varia ? infoCat(it.categoria || 'Altro').i : ICONA_ADER,
+      id: k, varia, mutuo, pdfPiano: null,
+      icona: varia ? infoCat(it.categoria || 'Altro').i : (mutuo ? ICONA_MUTUO : ICONA_ADER),
       nome: varia ? (it.categoria || 'Altro') : (it.pianoNome || k),
       tot: 0, pagate: 0, residuo: 0, pagatoImp: 0, scadute: 0, ultima: ''
     };
     const p = m[k];
     p.tot++;
+    if (it.pianoPdf) p.pdfPiano = it.pianoPdf;
     if (it.scadenza > p.ultima) p.ultima = it.scadenza;
     if (it.pagato) { p.pagate++; p.pagatoImp += Number(it.importo) || 0; }
     else { p.residuo += Number(it.importo) || 0; if (giorniA(it.scadenza) < 0) p.scadute++; }
@@ -1177,7 +1205,7 @@ function etichettaRata(it) {
   const tot = it.totaleRatePiano || (S.piani[it.pianoId] ? S.piani[it.pianoId].tot : '');
   return `Rata ${it.numeroRata}${tot ? '/' + tot : ''}`;
 }
-function icona(it) { return isVaria(it) ? infoCat(it.categoria || 'Altro').i : ICONA_ADER; }
+function icona(it) { return isVaria(it) ? infoCat(it.categoria || 'Altro').i : (isMutuo(it) ? ICONA_MUTUO : ICONA_ADER); }
 function sottotitolo(it) {
   if (!isVaria(it)) return it.numeroRata ? nomeBreve(it.pianoNome) : (it.pianoNome || '');
   const parti = [it.categoria || 'Altro'];
@@ -1188,7 +1216,8 @@ function sottotitolo(it) {
 }
 function filtratePiano() {
   if (S.piano === 'TUTTI') return lista();
-  if (S.piano === 'ADER') return lista().filter(it => !isVaria(it) || it.categoria === 'Cartella Agenzia Riscossioni');
+  if (S.piano === 'ADER') return lista().filter(it => (!isVaria(it) && !isMutuo(it)) || it.categoria === 'Cartella Agenzia Riscossioni');
+  if (S.piano === 'MUTUI') return lista().filter(isMutuo);
   if (S.piano === 'VARIE') return lista().filter(it => isVaria(it) && it.categoria !== 'Cartella Agenzia Riscossioni');
   return lista().filter(it => pianoKey(it) === S.piano);
 }
@@ -1218,11 +1247,12 @@ function visibili() {
 
 function render() {
   S.piani = mappaPiani();
-  if (!['TUTTI', 'ADER', 'VARIE'].includes(S.piano) && !S.piani[S.piano]) S.piano = 'TUTTI';
+  if (!['TUTTI', 'ADER', 'VARIE', 'MUTUI'].includes(S.piano) && !S.piani[S.piano]) S.piano = 'TUTTI';
   for (const id of [...S.sel]) if (!S.items[id]) S.sel.delete(id);
   aggiornaVerbaliScaduti();
   renderSelettori();
   renderKpi();
+  renderSommaMensile();
   renderPromemoria();
   renderLista();
   renderBulk();
@@ -1232,11 +1262,13 @@ function render() {
 
 function renderSelettori() {
   const chiavi = Object.keys(S.piani).sort((a, b) => S.piani[a].nome.localeCompare(S.piani[b].nome));
-  const ader = chiavi.filter(k => !S.piani[k].varia || S.piani[k].nome === 'Cartella Agenzia Riscossioni');
+  const ader = chiavi.filter(k => (!S.piani[k].varia && !S.piani[k].mutuo) || S.piani[k].nome === 'Cartella Agenzia Riscossioni');
+  const mutui = chiavi.filter(k => S.piani[k].mutuo);
   const varie = chiavi.filter(k => S.piani[k].varia && S.piani[k].nome !== 'Cartella Agenzia Riscossioni');
   const opt = k => `<option value="${esc(k)}">${S.piani[k].icona} ${esc(nomeBreve(S.piani[k].nome))} — da pagare ${formatEuro(S.piani[k].residuo)}</option>`;
   $('pianoSel').innerHTML = `<option value="TUTTI">📊 Tutte le scadenze</option>` +
     (ader.length ? `<optgroup label="Cartelle AdER & Riscossioni"><option value="ADER">📑 Tutte le cartelle AdER</option>${ader.map(opt).join('')}</optgroup>` : '') +
+    (mutui.length ? `<optgroup label="Mutui"><option value="MUTUI">🏦 Tutti i mutui</option>${mutui.map(opt).join('')}</optgroup>` : '') +
     (varie.length ? `<optgroup label="Altre scadenze"><option value="VARIE">🗓️ Tutte le altre scadenze</option>${varie.map(opt).join('')}</optgroup>` : '');
   $('pianoSel').value = S.piano;
 
@@ -1244,7 +1276,101 @@ function renderSelettori() {
   $('pianoMod').innerHTML = '<option value="">— Seleziona —</option>' +
     chiavi.map(k => `<option value="${esc(k)}">${S.piani[k].icona} ${esc(S.piani[k].nome)}</option>`).join('');
   if (S.piani[prec]) $('pianoMod').value = prec; else $('boxPianoMod').hidden = true;
+  aggiornaBtnPdfPiano();
 }
+
+// ---------- Totale mensile e avviso del mese successivo (campanella) ----------
+let meseAvviso = null; // mese scelto dall'utente per l'avviso; se vuoto è il mese successivo
+const chiaveMese = offset => { const d = new Date(); const x = new Date(d.getFullYear(), d.getMonth() + offset, 1); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`; };
+const meseLabel = k => { const s = dataLocale(k + '-01').toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }); return s.charAt(0).toUpperCase() + s.slice(1); };
+// Importi con il punto per le migliaia e la virgola per i centesimi, es. 1.234,56 €
+function euroPunto(v) {
+  const n = Math.round((Number(v) || 0) * 100) / 100;
+  const [parteIntera, decimali] = Math.abs(n).toFixed(2).split('.');
+  return (n < 0 ? '-' : '') + parteIntera.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + decimali + ' €';
+}
+function renderSommaMensile() {
+  const arr = filtratePiano();
+  const box = $('sommaMensile');
+  box.hidden = !arr.length;
+  if (!arr.length) { box.innerHTML = ''; return; }
+
+  // 1) avviso: scadenze del mese scelto (di default il mese successivo)
+  if (!meseAvviso) meseAvviso = chiaveMese(1);
+  const opzioni = Array.from({ length: 24 }, (_, i) => chiaveMese(i + 1))
+    .map(k => `<option value="${k}" ${k === meseAvviso ? 'selected' : ''}>${esc(meseLabel(k))}</option>`).join('');
+  const delMese = arr.filter(it => it.scadenza.slice(0, 7) === meseAvviso).sort(asc);
+  const daPagare = delMese.filter(i => !i.pagato);
+  const totMese = delMese.reduce((s, i) => s + (Number(i.importo) || 0), 0);
+  const totDaPagare = daPagare.reduce((s, i) => s + (Number(i.importo) || 0), 0);
+  const elenco = delMese.slice(0, 10).map(it => `<li>${formatData(it.scadenza)} · ${esc(etichettaRata(it))} · ${esc(sottotitolo(it))} — <b class="num">${euroPunto(it.importo)}</b>${it.pagato ? ' ✓ pagata' : ''}</li>`).join('');
+  const avviso = delMese.length
+    ? `<div class="alert ${daPagare.length ? 'alert-amber' : 'alert-ok'}" style="display:block;">
+         <div class="row" style="justify-content:space-between;align-items:center;">
+           <b>🔔 Scadenze di ${esc(meseLabel(meseAvviso))}</b>
+           <select id="meseAvviso" style="width:auto;">${opzioni}</select>
+         </div>
+         <div style="margin:6px 0;">${delMese.length} ${delMese.length === 1 ? 'scadenza' : 'scadenze'} per <b class="num">${euroPunto(totMese)}</b>${daPagare.length ? ` · da pagare ${daPagare.length} per <b class="num">${euroPunto(totDaPagare)}</b>` : ' · tutte pagate'}</div>
+         <ul style="margin:0;padding-left:18px;">${elenco}</ul>
+         ${delMese.length > 10 ? `<small>…e altre ${delMese.length - 10}</small>` : ''}
+       </div>`
+    : `<div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px;">
+         <b>🔔 ${esc(meseLabel(meseAvviso))}</b>
+         <select id="meseAvviso" style="width:auto;">${opzioni}</select>
+       </div>
+       <div class="alert alert-ok" style="margin:0;">✅ Nessuna scadenza in questo mese.</div>`;
+
+  // 2) totale per mese
+  const mesi = {};
+  arr.forEach(it => {
+    const k = it.scadenza.slice(0, 7), imp = Number(it.importo) || 0;
+    if (!mesi[k]) mesi[k] = { n: 0, tot: 0, pag: 0, dap: 0 };
+    mesi[k].n++; mesi[k].tot += imp;
+    if (it.pagato) mesi[k].pag += imp; else mesi[k].dap += imp;
+  });
+  const etichetta = S.piano === 'TUTTI' ? 'Tutte le scadenze' : S.piano === 'ADER' ? 'Cartelle AdER'
+    : S.piano === 'MUTUI' ? 'Mutui' : S.piano === 'VARIE' ? 'Altre scadenze' : nomeBreve(S.piani[S.piano].nome);
+  const oggi = chiaveMese(0);
+  let tN = 0, tT = 0, tP = 0, tD = 0;
+  const righe = Object.keys(mesi).sort().map((k, i) => {
+    const m = mesi[k];
+    tN += m.n; tT += m.tot; tP += m.pag; tD += m.dap;
+    return `<tr class="${i % 2 ? 'zebra' : ''}">
+      <td><b>${esc(meseLabel(k))}</b>${k === oggi ? ' <span class="badge b-dapagare">questo mese</span>' : ''}</td>
+      <td class="r num">${m.n}</td>
+      <td class="r num"><b>${euroPunto(m.tot)}</b></td>
+      <td class="r num">${euroPunto(m.pag)}</td>
+      <td class="r num">${euroPunto(m.dap)}</td>
+    </tr>`;
+  }).join('');
+
+  box.innerHTML = `
+    ${avviso}
+    <div class="card-h" style="margin-top:14px;"><h3>Totale per mese</h3><small>${esc(etichetta)}</small></div>
+    <div style="overflow:auto;max-height:420px;">
+      <table class="plain">
+        <thead><tr>
+          <th style="position:sticky;top:0;z-index:2;background:var(--surface-2);">Mese</th>
+          <th class="r" style="position:sticky;top:0;z-index:2;background:var(--surface-2);">Scadenze</th>
+          <th class="r" style="position:sticky;top:0;z-index:2;background:var(--surface-2);">Totale</th>
+          <th class="r" style="position:sticky;top:0;z-index:2;background:var(--surface-2);">Pagato</th>
+          <th class="r" style="position:sticky;top:0;z-index:2;background:var(--surface-2);">Da pagare</th>
+        </tr></thead>
+        <tbody>${righe}</tbody>
+        <tfoot><tr>
+          <th style="position:sticky;bottom:0;z-index:2;background:var(--surface-2);">Totale</th>
+          <th class="r num" style="position:sticky;bottom:0;z-index:2;background:var(--surface-2);">${tN}</th>
+          <th class="r num" style="position:sticky;bottom:0;z-index:2;background:var(--surface-2);">${euroPunto(tT)}</th>
+          <th class="r num" style="position:sticky;bottom:0;z-index:2;background:var(--surface-2);">${euroPunto(tP)}</th>
+          <th class="r num" style="position:sticky;bottom:0;z-index:2;background:var(--surface-2);">${euroPunto(tD)}</th>
+        </tr></tfoot>
+      </table>
+    </div>`;
+}
+// Cambio del mese dell'avviso: si gestisce una volta sola, anche dopo ogni ridisegno
+$('sommaMensile').addEventListener('change', e => {
+  if (e.target.id === 'meseAvviso') { meseAvviso = e.target.value; renderSommaMensile(); }
+});
 
 function renderKpi() {
   let res = 0, pag = 0, comm = 0, nAp = 0, nPag = 0, nScad = 0, impScad = 0;
@@ -1514,7 +1640,7 @@ document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click'
 
 function mostraSub(s) {
   document.querySelectorAll('[data-sub]').forEach(x => x.classList.toggle('active', x.dataset.sub === s));
-  ['singola', 'ai', 'pdf', 'manuale', 'modulo', 'quietanza'].forEach(x => { $('sub-' + x).hidden = x !== s; });
+  ['singola', 'ai', 'pdf', 'mutuo', 'manuale', 'modulo', 'quietanza'].forEach(x => { $('sub-' + x).hidden = x !== s; });
 }
 document.querySelectorAll('[data-sub]').forEach(b => b.addEventListener('click', () => mostraSub(b.dataset.sub)));
 
@@ -1989,7 +2115,7 @@ function parseModulo(testo) {
   return { ist, moduli };
 }
 function trovaRataPerModulo(mod, ist) {
-  const del = x => !isVaria(x) && (!ist || x.pianoId === `piano_${ist}` || (x.pianoNome || '').includes(ist) || (x.titolo || '').includes(ist));
+  const del = x => !isVaria(x) && !isMutuo(x) && (!ist || x.pianoId === `piano_${ist}` || (x.pianoNome || '').includes(ist) || (x.titolo || '').includes(ist));
   const candidate = lista().filter(x => del(x) && x.numeroRata === mod.rata);
   const esatta = candidate.find(x => x.scadenza === mod.scadenza);
   if (esatta) return { it: esatta, esatta: true };
@@ -2106,6 +2232,10 @@ function documentiArchivio() {
       it, tipo: 'Quietanza', nome: it.ricevuta.nomeFile || 'quietanza.pdf', pdf: it.ricevuta.pdf,
       data: it.ricevuta.dataPagamento || it.dataPagamento || '', importo: it.ricevuta.importo || it.importo,
       avviso: it.ricevuta.avviso || it.codiceAvviso || ''
+    });
+    if (it.pianoPdf && it.pianoPdf.pdf) out.push({
+      it, tipo: 'Piano di ammortamento', nome: it.pianoPdf.nomeFile || 'piano.pdf', pdf: it.pianoPdf.pdf,
+      data: it.scadenza || '', importo: it.importo, avviso: ''
     });
     if (it.modulo && it.modulo.pdf) out.push({
       it, tipo: 'Modulo di pagamento', nome: it.modulo.nomeFile || 'modulo.pdf', pdf: it.modulo.pdf,
@@ -2349,6 +2479,129 @@ $('importPdfFile').addEventListener('change', async e => {
     }
   } catch (err) {
     st.textContent = '❌ Errore lettura PDF: ' + err.message;
+  }
+});
+
+// ==============================================================
+// MUTUI: piano di ammortamento da PDF (rate, capitale, interessi, debito residuo)
+// ==============================================================
+// Dagli importi di una riga (il trattino vale 0) trova la rata. Prima cerca la coppia capitale + interessi,
+// poi, solo se non basta, una terna con un terzo importo (mora/oneri) da sommare alla rata.
+function scomponiRataMutuo(a, haResiduo) {
+  const n = a.length;
+  for (const conTerzo of [false, true]) {
+    for (let k = 0; k < n; k++) {
+      if (a[k] <= 0) continue;
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        if (i === k || j === k) continue;
+        const candidati = conTerzo ? a.map((_, x) => x).filter(x => x !== i && x !== j && x !== k) : [-1];
+        for (const l of candidati) {
+          const somma = a[i] + a[j] + (l >= 0 ? a[l] : 0);
+          if (Math.abs(somma - a[k]) > 0.02) continue;
+          const usati = new Set([i, j, k, l]);
+          const altri = a.filter((_, x) => !usati.has(x));
+          const mora = Math.round((a[k] - a[i] - a[j]) * 100) / 100;
+          return { rata: a[k], capitale: a[i], interessi: a[j], mora: mora > 0 ? mora : 0,
+                   residuo: haResiduo && altri.length ? altri[altri.length - 1] : null };
+        }
+      }
+    }
+  }
+  return null;
+}
+// Date: GG/MM/AAAA oppure GGMMAA (come nei piani della Banca Popolare Pugliese)
+function dataMutuo(s) {
+  if (/^\d{6}$/.test(s)) return `20${s.slice(4, 6)}-${s.slice(2, 4)}-${s.slice(0, 2)}`;
+  return parseDataAdER(s);
+}
+function parseAmmortamentoMutuo(testo, pagateFino = 0) {
+  const haResiduo = /debito\s*residuo/i.test(testo);
+  // Riga: N. [stato] data importi... (importi o "-"). Il numero 0 sono le rate di preammortamento (solo interessi).
+  // Lo stato (P = pagata) può stare prima o dopo la data, a seconda di come il PDF è estratto
+  const re = /(?:^|\s)(\d{1,3})\s+(?:([A-Z])\s+)?(\d{2}[\/.]\d{2}[\/.]\d{4}|\d{6})(?:\s+([A-Z])(?=\s))?((?:\s+€?\s*(?:\d+(?:\.\d{3})*,\s?\d{2}|-))+)/g;
+  const trovate = new Map();
+  let m;
+  while ((m = re.exec(testo)) !== null) {
+    const n = parseInt(m[1], 10), scadenza = dataMutuo(m[3]), chiaveRiga = `${n}|${scadenza}`;
+    if (trovate.has(chiaveRiga)) continue;
+    const importi = (m[5].match(/\d+(?:\.\d{3})*,\s?\d{2}|-/g) || [])
+      .map(x => x === '-' ? 0 : parseValore(x.replace(/\s/g, '')));
+    const riga = scomponiRataMutuo(importi, haResiduo);
+    const pagata = m[2] === 'P' || m[4] === 'P' || (n > 0 && pagateFino > 0 && n <= pagateFino);
+    if (riga) trovate.set(chiaveRiga, Object.assign({ n, scadenza, pagata }, riga));
+  }
+  return [...trovate.values()].sort((a, b) => a.scadenza.localeCompare(b.scadenza) || a.n - b.n);
+}
+function aggiornaBtnPdfPiano() {
+  const p = S.piani[$('pianoMod').value];
+  $('btnPdfPiano').hidden = !(p && p.pdfPiano);
+}
+
+$('btnMutuoPdf').addEventListener('click', () => $('importMutuoFile').click());
+$('btnPdfPiano').addEventListener('click', () => {
+  const p = S.piani[$('pianoMod').value];
+  if (!p || !p.pdfPiano) { alert('Nessun PDF archiviato per questo piano.'); return; }
+  scaricaBase64(p.pdfPiano.pdf, p.pdfPiano.nomeFile || 'piano_ammortamento.pdf');
+});
+$('importMutuoFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const st = $('statusMutuo');
+  if (typeof pdfjsLib === 'undefined') { st.textContent = '❌ Libreria PDF non caricata. Ricarica la pagina.'; return; }
+  st.textContent = '⏳ Lettura del piano di ammortamento in corso…';
+  try {
+    const testo = await leggiTestoPdf(file);
+    if (!testo.trim()) { st.textContent = '❌ Questo PDF è una scansione senza testo: l\'app non può leggerlo. Serve la versione digitale del piano (es. scaricata dall\'home banking).'; return; }
+    const rate = parseAmmortamentoMutuo(testo, Number($('mutuoPagateFino').value) || 0);
+    if (!rate.length) { st.textContent = '❌ Nessuna rata riconosciuta. Serve il piano di ammortamento con le colonne rata, scadenza, capitale e interessi.'; return; }
+    const totRate = rate.filter(r => r.n > 0).length, pre = rate.length - totRate;
+    const maxN = Math.max(0, ...rate.map(r => r.n));
+    const mancanti = [];
+    for (let n = 1; n <= maxN; n++) if (!rate.some(r => r.n === n)) mancanti.push(n);
+
+    const base = file.name.replace(/\.[^/.]+$/, '');
+    const nome = 'Mutuo · ' + base.replace(/_/g, ' ').trim();
+    const pianoId = 'mutuo_' + chiave(base.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+    const somma = k => rate.reduce((s, r) => s + (Number(r[k]) || 0), 0);
+
+    const upd = {};
+    const esistenti = lista().filter(it => it.pianoId === pianoId);
+    if (esistenti.length) {
+      const pagate = esistenti.filter(i => i.pagato).length;
+      if (!confirm(`⚠️ Piano già presente:\n"${nome}"\n\nOK = sostituiscilo${pagate ? ` (si perdono i ${pagate} pagamenti registrati)` : ''}\nAnnulla = lascia com'è`)) {
+        st.textContent = 'Importazione annullata: il piano era già presente.'; return;
+      }
+      esistenti.forEach(it => { upd[it.id] = null; });
+    }
+
+    // Il PDF del piano si archivia una sola volta, sulla prima rata
+    const pdfB64 = file.size <= MUTUO_PDF_MAX_BYTES ? await fileToBase64(file) : null;
+    let nPre = 0;
+    rate.forEach(r => {
+      r.id = r.n > 0 ? `${pianoId}_rata_${r.n}` : `${pianoId}_pre_${++nPre}`;
+      const it = normalizza({
+        id: r.id, pianoId, pianoNome: nome, numeroRata: r.n > 0 ? r.n : null, totaleRatePiano: r.n > 0 ? totRate : null,
+        titolo: r.n > 0 ? `${nome} - Rata ${r.n}` : `${nome} - Preammortamento ${nPre}`, categoria: CAT_MUTUO, importo: r.rata, quotaCapitale: r.capitale,
+        quotaMora: r.mora, quotaInteressi: r.interessi, quotaNotifica: 0, scadenza: r.scadenza,
+        pagato: r.pagata, dataPagamento: r.pagata ? r.scadenza : null, banca: r.pagata ? BANCA_ADDEBITO_MUTUI : null, debitoResiduo: r.residuo,
+        note: [r.pagata ? 'Pagata secondo il piano (data di pagamento = scadenza)' : '', r.residuo !== null ? `Debito residuo ${formatEuro(r.residuo)}` : ''].filter(Boolean).join(' · ')
+      });
+      upd[it.id] = conMeta(it);
+    });
+    if (pdfB64) upd[rate[0].id].pianoPdf = { nomeFile: file.name, pdf: pdfB64 };
+
+    const msg = `✅ Importate ${totRate} rate${pre ? ` e ${pre} di preammortamento` : ''} (${rate.filter(r => r.pagata).length} già pagate) · capitale ${formatEuro(somma('capitale'))} · interessi ${formatEuro(somma('interessi'))}` +
+      (mancanti.length ? ` · ⚠️ rate non lette: ${mancanti.join(', ')}` : '') +
+      (pdfB64 ? '' : ' · PDF oltre 600 KB: non archiviato');
+    if (await scrivi(upd, msg)) {
+      st.textContent = msg;
+      S.piano = pianoId; S.stato = 'aperte';
+      impostaStato('aperte'); render(); vai('scadenze');
+    }
+  } catch (err) {
+    console.error(err);
+    st.textContent = '❌ Errore nella lettura del PDF: ' + err.message;
   }
 });
 
@@ -2879,6 +3132,7 @@ async function proponiRinnovi(items) {
 $('pianoMod').addEventListener('change', () => {
   const k = $('pianoMod').value;
   $('boxPianoMod').hidden = !S.piani[k];
+  aggiornaBtnPdfPiano();
   if (S.piani[k]) $('pianoNuovoNome').value = S.piani[k].nome;
 });
 $('btnRinomina').addEventListener('click', async () => {
