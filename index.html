@@ -1078,11 +1078,32 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') document.que
 function riempiBanche(sel) {
   sel.innerHTML = CANALI_PAGAMENTO.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
 }
+// Banche aggiunte dall'utente (riconosciute su una ricevuta): restano nell'elenco anche dopo il ricaricamento
+try {
+  JSON.parse(leggiLS('scadp_banche_extra', '[]')).forEach(b => {
+    if (typeof b === 'string' && b && !CANALI_PAGAMENTO.includes(b)) CANALI_PAGAMENTO.splice(CANALI_PAGAMENTO.length - 1, 0, b);
+  });
+} catch (e) { /* dati non leggibili: ignora */ }
 document.querySelectorAll('.sel-banche').forEach(riempiBanche);
 // Imposta un canale anche se non è nell'elenco standard (dati vecchi o importati)
 function impostaBanca(sel, v) {
   if (v && ![...sel.options].some(o => o.value === v)) sel.add(new Option(v, v));
   sel.value = v || CANALI_PAGAMENTO[0];
+}
+// Banca riconosciuta su una ricevuta: se non è in elenco la crea e la ricorda. Restituisce il nome da usare, o null.
+function registraBanca(nome) {
+  const pulito = String(nome || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+  if (!pulito || /^(null|n\/d|-)$/i.test(pulito)) return null;
+  const esistente = CANALI_PAGAMENTO.find(b => b.toLowerCase() === pulito.toLowerCase());
+  if (esistente) return esistente;
+  CANALI_PAGAMENTO.splice(CANALI_PAGAMENTO.length - 1, 0, pulito);
+  let extra = [];
+  try { extra = JSON.parse(leggiLS('scadp_banche_extra', '[]')); } catch (e) { extra = []; }
+  if (!Array.isArray(extra)) extra = [];
+  if (!extra.includes(pulito)) extra.push(pulito);
+  scriviLS('scadp_banche_extra', JSON.stringify(extra));
+  document.querySelectorAll('.sel-banche').forEach(riempiBanche);
+  return pulito;
 }
 
 /* ---------- Tema ---------- */
@@ -1711,6 +1732,7 @@ document.addEventListener('click', e => {
     case 'pick':
       chiudiModal('pickModal');
       apriPagamento([id], pickDati.comm, pickDati.data);
+      if (pickDati.banca) impostaBanca($('payBanca'), pickDati.banca);
       if (pickDati.foto) ricevutaPendente = pickDati.foto;
       break;
   }
@@ -2439,7 +2461,7 @@ Rispondi SOLO con JSON: {"categoria":"...","titolo":"...","ente":"...","riferime
 });
 
 /* ---------- Ricevuta → trova la scadenza e registra il pagamento ---------- */
-let pickDati = { comm: 0, data: null };
+let pickDati = { comm: 0, data: null, banca: null };
 $('btnScanReceipt').addEventListener('click', () => {
   if (!aiKey()) { alert('❌ Manca la chiave API Gemini. Vai in "Gestione" e inseriscila.'); return; }
   $('fileReceiptAi').click();
@@ -2455,8 +2477,8 @@ $('fileReceiptAi').addEventListener('change', async e => {
   try {
     const fd = await preparaFile(file);
     const prompt = `Analizza questa ricevuta o contabile di pagamento italiana (pagoPA, bollettino, F24, PagoBancomat, tabaccheria).
-Estrai: "importo_dovuto" = importo del documento pagato SENZA commissioni; "commissione" = commissione/costo del servizio (0 se assente); "totale" = totale addebitato; "data" = data del pagamento in formato YYYY-MM-DD; "beneficiario" = ente o azienda che riceve il pagamento; "riferimento" = targa, codice avviso o numero polizza se presente.
-Rispondi SOLO con JSON: {"importo_dovuto":141.91,"commissione":2.00,"totale":143.91,"data":"2026-10-07","beneficiario":"UnipolSai","riferimento":null}. Usa null per i dati mancanti.`;
+Estrai: "importo_dovuto" = importo del documento pagato SENZA commissioni; "commissione" = commissione/costo del servizio (0 se assente); "totale" = totale addebitato; "data" = data del pagamento in formato YYYY-MM-DD; "beneficiario" = ente o azienda che riceve il pagamento; "riferimento" = targa, codice avviso o numero polizza se presente; "banca" = nome della banca che ha eseguito l'operazione, come appare su intestazione o logo (es. BBVA, Intesa Sanpaolo, Poste Italiane), null se non compare o se è solo un sistema di pagamento (es. PagoPA).
+Rispondi SOLO con JSON: {"importo_dovuto":141.91,"commissione":2.00,"totale":143.91,"data":"2026-10-07","beneficiario":"UnipolSai","riferimento":null,"banca":null}. Usa null per i dati mancanti.`;
     const info = await chiamaGemini(fd, prompt);
     nascondiToast();
 
@@ -2485,14 +2507,16 @@ Rispondi SOLO con JSON: {"importo_dovuto":141.91,"commissione":2.00,"totale":143
     match.sort((a, b) => Math.abs(giorniA(a.scadenza)) - Math.abs(giorniA(b.scadenza)));
 
     const data = isoValida(info.data) ? info.data : null;
+    const banca = registraBanca(info.banca);
     if (!match.length) {
       alert(`Nessuna scadenza aperta da ${formatEuro(dovuto)}${info.beneficiario ? ' (' + info.beneficiario + ')' : ''}.\nControlla l'importo o registra il pagamento a mano.`);
     } else if (match.length === 1) {
       apriPagamento([match[0].id], comm, data);
+      if (banca) impostaBanca($('payBanca'), banca);
       ricevutaPendente = await fotoRicevuta(file, dovuto, data);
       mostraToast(`✅ Trovata: ${etichettaRata(match[0])} · ${sottotitolo(match[0])}`);
     } else {
-      pickDati = { comm, data, foto: await fotoRicevuta(file, dovuto, data) };
+      pickDati = { comm, data, banca, foto: await fotoRicevuta(file, dovuto, data) };
       $('pickInfo').textContent = `Ricevuta da ${formatEuro(dovuto)}${info.beneficiario ? ' · ' + info.beneficiario : ''}${data ? ' del ' + formatData(data) : ''}. Ci sono ${match.length} scadenze compatibili:`;
       $('pickList').innerHTML = match.slice(0, 10).map(i => `
         <button class="pick" data-act="pick" data-id="${esc(i.id)}">
