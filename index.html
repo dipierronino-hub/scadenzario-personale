@@ -85,6 +85,7 @@
     .top-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
     .icon-btn { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; display: flex; align-items: center; justify-content: center; }
     .icon-btn:hover { background: var(--surface-2); }
+    .t-short { display: none; }
     .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 4px; }
     .dot.on { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
     .dot.off { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,.2); }
@@ -256,8 +257,8 @@
     }
     @media (max-width: 820px) {
       .nav { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; z-index: 60; background: var(--surface); border-top: 1px solid var(--border);
-        display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
-      .nav button { flex-direction: column; gap: 2px; font-size: .72rem; padding: 6px 2px; }
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+      .nav button { flex-direction: column; gap: 2px; font-size: .66rem; padding: 6px 2px; min-width: 0; white-space: nowrap; justify-content: center; }
       .nav button span { font-size: 1.15rem; }
       .brand small { display: none; }
       .table-wrap { display: none; }
@@ -267,6 +268,17 @@
       .wrap { padding: 12px 12px 120px; }
       .kpi .v { font-size: 1.2rem; }
       .chart-box { height: 260px; }
+      .contextbar { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+      .contextbar label { white-space: nowrap; }
+      #pianoSel { flex: 1 1 0; min-width: 0; width: auto; font-size: .85rem; }
+      .contextbar .btn { white-space: nowrap; flex: 0 0 auto; }
+      .t-full { display: none; }
+      .t-short { display: inline; }
+      .rcard { grid-template-columns: auto minmax(0, 1fr); }
+      .rcard .rc-imp { grid-column: 2; text-align: left; white-space: normal; font-size: 1.05rem; }
+      .rcard .rc-sub { overflow-wrap: anywhere; }
+      #tbCartelle th[style], #tbCartelle td { min-width: 0; }
+      #tbCartelle th[style] { min-width: 96px !important; }
     }
   </style>
 </head>
@@ -309,7 +321,7 @@
       <div class="top-right">
         <span id="cloudDot" class="dot off" title="Connessione al cloud"></span>
         <button class="icon-btn" id="btnTema" title="Tema chiaro / scuro" aria-label="Cambia tema">🌓</button>
-        <button class="icon-btn" id="btnLogout" title="Esci" aria-label="Esci">⏻</button>
+        <button class="icon-btn" id="btnLogout" title="Esci" aria-label="Esci"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 2.5v9"/><path d="M6.3 5.9a8.5 8.5 0 1 0 11.4 0"/></svg></button>
       </div>
     </div>
   </header>
@@ -318,7 +330,7 @@
     <div id="contextBar" class="contextbar">
       <label for="pianoSel">Mostra</label>
       <select id="pianoSel"></select>
-      <button class="btn btn-primary" id="btnNuova">➕ Nuova scadenza</button>
+      <button class="btn btn-primary" id="btnNuova">➕ <span class="t-full">Nuova scadenza</span><span class="t-short">Nuova</span></button>
     </div>
 
     <!-- ======== SCADENZE ======== -->
@@ -1692,6 +1704,7 @@ document.addEventListener('click', e => {
     case 'pick':
       chiudiModal('pickModal');
       apriPagamento([id], pickDati.comm, pickDati.data);
+      if (pickDati.foto) ricevutaPendente = pickDati.foto;
       break;
   }
 });
@@ -2067,6 +2080,35 @@ function bancaDaPsp(psp) {
   if (p.includes('pugliese')) return 'BANCA POPOLARE PUGLIESE';
   return 'Altro / Cassa';
 }
+// Foto di una ricevuta → PDF leggero da archiviare con la rata (sotto PDF_MAX_BYTES). Restituisce l'oggetto ricevuta o null.
+async function fotoRicevuta(file, importo, data) {
+  if (!file || !file.type.startsWith('image/') || typeof window.jspdf === 'undefined') return null;
+  const { jsPDF } = window.jspdf;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+    for (const [larghezza, qualita] of [[1600, 0.8], [1200, 0.7], [1000, 0.6], [800, 0.5]]) {
+      const scala = Math.min(1, larghezza / img.naturalWidth);
+      const w = Math.round(img.naturalWidth * scala), h = Math.round(img.naturalHeight * scala);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const doc = new jsPDF({ unit: 'pt', format: [w, h], orientation: w > h ? 'l' : 'p', compress: true });
+      doc.addImage(canvas.toDataURL('image/jpeg', qualita), 'JPEG', 0, 0, w, h);
+      const blob = doc.output('blob');
+      if (blob.size <= PDF_MAX_BYTES) {
+        return { avviso: null, iuv: null, idTransazione: null, psp: null, importo, dataPagamento: data,
+          nomeFile: file.name.replace(/\.[^.]+$/, '') + '.pdf', pdf: await fileToBase64(blob) };
+      }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 // PDF pesante: ogni pagina viene ridisegnata come immagine JPEG compressa, poi ricomposta in un PDF leggero.
 // Il testo non resta selezionabile, ma la quietanza è leggibile. Prova qualità decrescenti fino a rientrare nel limite.
 async function alleggeriscPdf(file) {
@@ -2381,9 +2423,10 @@ Rispondi SOLO con JSON: {"importo_dovuto":141.91,"commissione":2.00,"totale":143
       alert(`Nessuna scadenza aperta da ${formatEuro(dovuto)}${info.beneficiario ? ' (' + info.beneficiario + ')' : ''}.\nControlla l'importo o registra il pagamento a mano.`);
     } else if (match.length === 1) {
       apriPagamento([match[0].id], comm, data);
+      ricevutaPendente = await fotoRicevuta(file, dovuto, data);
       mostraToast(`✅ Trovata: ${etichettaRata(match[0])} · ${sottotitolo(match[0])}`);
     } else {
-      pickDati = { comm, data };
+      pickDati = { comm, data, foto: await fotoRicevuta(file, dovuto, data) };
       $('pickInfo').textContent = `Ricevuta da ${formatEuro(dovuto)}${info.beneficiario ? ' · ' + info.beneficiario : ''}${data ? ' del ' + formatData(data) : ''}. Ci sono ${match.length} scadenze compatibili:`;
       $('pickList').innerHTML = match.slice(0, 10).map(i => `
         <button class="pick" data-act="pick" data-id="${esc(i.id)}">
