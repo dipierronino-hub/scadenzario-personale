@@ -279,6 +279,13 @@
       .rcard .rc-sub { overflow-wrap: anywhere; }
       #tbCartelle th[style], #tbCartelle td { min-width: 0; }
       #tbCartelle th[style] { min-width: 96px !important; }
+      .hide-m { display: none; }
+      .arch-tab { table-layout: auto; width: 100%; min-width: 0; }
+      .arch-tab td, .arch-tab th { overflow-wrap: anywhere; }
+      .arch-tab td:first-child { white-space: nowrap; }
+      .arch-riga { cursor: pointer; }
+      .arch-riga:active { background: var(--surface-2); }
+      .nome-file { overflow-wrap: anywhere; word-break: break-word; }
     }
   </style>
 </head>
@@ -2303,15 +2310,15 @@ function renderArchivio() {
   const kb = Math.round(archDocs.reduce((s, d) => s + d.pdf.length * 0.75, 0) / 1024);
   $('archInfo').textContent = `${archDocs.length} documenti archiviati · circa ${kb} KB · ${visibili.length} visibili`;
   $('archLista').innerHTML = visibili.length
-    ? '<table><thead><tr><th>Data</th><th>Documento</th><th>Piano / rata</th><th>Importo</th><th>Banca</th><th>Codice avviso</th><th></th></tr></thead><tbody>' +
-      visibili.map(({ d, i }) => `<tr>
+    ? '<table class="arch-tab"><thead><tr><th>Data</th><th>Documento</th><th class="hide-m">Piano / rata</th><th>Importo</th><th class="hide-m">Banca</th><th class="hide-m">Codice avviso</th><th></th></tr></thead><tbody>' +
+      visibili.map(({ d, i }) => `<tr class="arch-riga" data-arch="${i}" title="Tocca per scaricare il PDF">
         <td class="num">${formatData(d.data)}</td>
-        <td>${esc(d.tipo)}<br><small>${esc(d.nome)}</small></td>
-        <td>${esc(d.it.pianoNome)}<br><small>${esc(etichettaRata(d.it))}</small></td>
+        <td>${esc(d.tipo)}<br><small class="nome-file">${esc(d.nome)}</small></td>
+        <td class="hide-m">${esc(d.it.pianoNome)}<br><small>${esc(etichettaRata(d.it))}</small></td>
         <td class="num">${formatEuro(d.importo)}</td>
-        <td>${esc(d.it.banca || '-')}</td>
-        <td class="num">${esc(d.avviso || '-')}</td>
-        <td><button class="ib" data-arch="${i}" title="Scarica PDF">⬇️</button></td>
+        <td class="hide-m">${esc(d.it.banca || '-')}</td>
+        <td class="num hide-m">${esc(d.avviso || '-')}</td>
+        <td><button class="ib" data-arch="${i}" title="Scarica PDF" aria-label="Scarica PDF">⬇️</button></td>
       </tr>`).join('') + '</tbody></table>'
     : '<p class="hint">Nessun documento archiviato. Carica un modulo di pagamento o una quietanza.</p>';
 }
