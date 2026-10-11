@@ -9,7 +9,10 @@
     "personale": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid && root.child('utenti_autorizzati').child($uid).val() === true",
-        ".write": "auth != null && auth.uid === $uid && root.child('utenti_autorizzati').child($uid).val() === true"
+        ".write": "auth != null && auth.uid === $uid && root.child('utenti_autorizzati').child($uid).val() === true",
+        "$id": {
+          ".validate": "newData.hasChildren(['id', 'titolo', 'importo', 'scadenza', 'pagato']) && newData.child('importo').isNumber() && newData.child('pagato').isBoolean() && newData.child('scadenza').isString() && newData.child('scadenza').val().length <= 10 && newData.child('titolo').isString() && newData.child('titolo').val().length <= 500 && (!newData.child('note').exists() || (newData.child('note').isString() && newData.child('note').val().length <= 2000))"
+        }
       }
     }
   }
