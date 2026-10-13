@@ -2087,6 +2087,8 @@ async function chiamaGemini(fileData, prompt) {
 // ==============================================================
 let ricevutaPendente = null;
 const PDF_MAX_BYTES = 150 * 1024; // la quietanza viene archiviata nel database solo se leggera
+const DOC_MAX_BYTES = 600 * 1024; // il documento scansionato (bolletta, polizza, avviso) viene archiviato con la scadenza solo se non supera questa dimensione
+let aiDocPendente = null; // documento letto dalla scansione IA, da archiviare con la scadenza che si sta salvando
 
 async function leggiTestoPdf(file) {
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
@@ -2305,7 +2307,7 @@ async function fotoRicevuta(file, importo, data) {
 
 // PDF pesante: ogni pagina viene ridisegnata come immagine JPEG compressa, poi ricomposta in un PDF leggero.
 // Il testo non resta selezionabile, ma la quietanza è leggibile. Prova qualità decrescenti fino a rientrare nel limite.
-async function alleggeriscPdf(file) {
+async function alleggeriscPdf(file, limite = PDF_MAX_BYTES) {
   if (typeof window.jspdf === 'undefined') throw new Error('libreria di compressione non caricata');
   const { jsPDF } = window.jspdf;
   const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
@@ -2324,9 +2326,41 @@ async function alleggeriscPdf(file) {
       doc.addImage(img, 'JPEG', 0, 0, wPt, hPt);
     }
     const blob = doc.output('blob');
-    if (blob.size <= PDF_MAX_BYTES) return blob;
+    if (blob.size <= limite) return blob;
   }
   return null;
+}
+
+// Documento della scansione IA → PDF leggero da archiviare con la scadenza (sotto DOC_MAX_BYTES). Restituisce { nomeFile, pdf } o null.
+async function documentoPerArchivio(file) {
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  const blob = isPdf
+    ? (file.size <= DOC_MAX_BYTES ? file : await alleggeriscPdf(file, DOC_MAX_BYTES))
+    : await immagineInPdf(file);
+  if (!blob || blob.size > DOC_MAX_BYTES) return null;
+  return { nomeFile: file.name.replace(/\.[^.]+$/, '') + '.pdf', pdf: await fileToBase64(blob) };
+}
+// Immagine (foto, scansione JPG/PNG) → PDF di una pagina, ridotta a 1600 px. Restituisce un Blob o null.
+async function immagineInPdf(file) {
+  if (typeof window.jspdf === 'undefined' || !file.type.startsWith('image/')) return null;
+  const { jsPDF } = window.jspdf;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+    const scala = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scala), h = Math.round(img.naturalHeight * scala);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(img, 0, 0, w, h);
+    const doc = new jsPDF({ unit: 'pt', format: [w, h], orientation: w > h ? 'l' : 'p', compress: true });
+    doc.addImage(canvas.toDataURL('image/jpeg', 0.75), 'JPEG', 0, 0, w, h);
+    return doc.output('blob');
+  } catch (e) {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function fileToBase64(file) {
@@ -2476,6 +2510,10 @@ function documentiArchivio() {
       it, tipo: 'Piano di ammortamento', nome: it.pianoPdf.nomeFile || 'piano.pdf', pdf: it.pianoPdf.pdf,
       data: it.scadenza || '', importo: it.importo, avviso: ''
     });
+    if (it.documento && it.documento.pdf) out.push({
+      it, tipo: 'Documento', nome: it.documento.nomeFile || 'documento.pdf', pdf: it.documento.pdf,
+      data: it.scadenza || '', importo: it.importo, avviso: ''
+    });
     if (it.modulo && it.modulo.pdf) out.push({
       it, tipo: 'Modulo di pagamento', nome: it.modulo.nomeFile || 'modulo.pdf', pdf: it.modulo.pdf,
       data: it.scadenza || '', importo: it.importo, avviso: it.codiceAvviso || ''
@@ -2524,6 +2562,7 @@ $('fileAi').addEventListener('change', async e => {
   e.target.value = '';
   if (!file) return;
   const st = $('statusAi');
+  aiDocPendente = null;
   if (!aiKey()) { st.innerHTML = '❌ Manca la chiave API.<br>Vai in "Gestione", inseriscila e riprova.'; return; }
   st.textContent = `🪄 Analisi del documento in corso (${aiModello()})…`;
 
@@ -2541,6 +2580,7 @@ Estrai:
 Rispondi SOLO con JSON: {"categoria":"...","titolo":"...","ente":"...","riferimento":"...","importo":123.45,"scadenza":"YYYY-MM-DD"}. Usa null per i dati mancanti.`;
 
     const info = await chiamaGemini(fd, prompt);
+    try { aiDocPendente = await documentoPerArchivio(file); } catch (e) { aiDocPendente = null; }
 
     const cat = CATEGORIE.find(c => c.k.toLowerCase() === String(info.categoria || '').toLowerCase().trim());
     mostraSub('singola');
@@ -2559,6 +2599,7 @@ Rispondi SOLO con JSON: {"categoria":"...","titolo":"...","ente":"...","riferime
     st.textContent = mancanti.length
       ? `⚠️ Dati estratti, ma manca: ${mancanti.join(' e ')}. Completa il modulo.`
       : '✅ Dati estratti! Controlla il modulo e premi "Salva scadenza".';
+    st.textContent += aiDocPendente ? ' · 📎 Documento archiviato con la scadenza.' : ' · ⚠️ Documento troppo pesante: non verrà archiviato.';
     mostraToast(st.textContent);
   } catch (err) {
     st.textContent = '❌ ' + err.message;
@@ -3317,13 +3358,14 @@ $('scadenzaForm').addEventListener('submit', async e => {
       scadenzaOrdinaria: i === 0 ? scadOrd : null, importoOrdinario: i === 0 ? impOrd : null,
       veicolo: cat === 'Bollo Auto' ? veicoloCorrente : null
     });
-    upd[it.id] = conMeta(it);
+    upd[it.id] = conMeta(aiDocPendente && i === 0 ? Object.assign(it, { documento: aiDocPendente }) : it);
   }
   const btn = $('btnSalvaScad'); btn.disabled = true;
   const ok = await scrivi(upd, n > 1 ? `✅ Create ${n} scadenze` : `✅ Scadenza salvata`);
   btn.disabled = false;
   if (ok) {
     $('scadenzaForm').reset();
+    aiDocPendente = null;
     $('anteprima').textContent = ''; $('nuovaCat').value = ''; $('targaRapida').value = ''; $('statusAi').textContent = '';
     $('bolloTarga').value = ''; $('bolloRis').textContent = ''; $('bolloDati').hidden = true; veicoloCorrente = null; aggiornaTipoVeicolo();
     scegliCat(cat === catScelta ? cat : catScelta);
