@@ -2331,14 +2331,32 @@ async function alleggeriscPdf(file, limite = PDF_MAX_BYTES) {
   return null;
 }
 
-// Documento della scansione IA → PDF leggero da archiviare con la scadenza (sotto DOC_MAX_BYTES). Restituisce { nomeFile, pdf } o null.
+// Impronta SHA-256 del file originale: riconosce la stessa fattura anche se reinserita
+async function hashFile(file) {
+  const buf = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+// Doppioni: stesso documento (impronta) oppure stessa scadenza (categoria, importo, data, riferimento o ente)
+function trovaDuplicato(c) {
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const cents = Math.round(num2(c.importo) * 100);
+  const items = lista();
+  const stessoDoc = c.hash && items.find(it => it.documento && it.documento.hash === c.hash);
+  if (stessoDoc) return { it: stessoDoc, motivo: 'documento' };
+  const stessa = items.find(it =>
+    it.categoria === c.categoria && it.scadenza === c.scadenza && Math.round(num2(it.importo) * 100) === cents &&
+    ((norm(c.riferimento) && norm(it.riferimento) === norm(c.riferimento)) || (norm(c.ente) && norm(it.ente) === norm(c.ente))));
+  return stessa ? { it: stessa, motivo: 'scadenza' } : null;
+}
+// Documento della scansione IA → { nomeFile, pdf, hash }. pdf è null se il PDF è troppo pesante per l'archivio.
 async function documentoPerArchivio(file) {
   const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
   const blob = isPdf
     ? (file.size <= DOC_MAX_BYTES ? file : await alleggeriscPdf(file, DOC_MAX_BYTES))
     : await immagineInPdf(file);
-  if (!blob || blob.size > DOC_MAX_BYTES) return null;
-  return { nomeFile: file.name.replace(/\.[^.]+$/, '') + '.pdf', pdf: await fileToBase64(blob) };
+  const hash = await hashFile(file);
+  const pdf = blob && blob.size <= DOC_MAX_BYTES ? await fileToBase64(blob) : null;
+  return { nomeFile: file.name.replace(/\.[^.]+$/, '') + '.pdf', pdf, hash };
 }
 // Immagine (foto, scansione JPG/PNG) → PDF di una pagina, ridotta a 1600 px. Restituisce un Blob o null.
 async function immagineInPdf(file) {
@@ -2599,7 +2617,11 @@ Rispondi SOLO con JSON: {"categoria":"...","titolo":"...","ente":"...","riferime
     st.textContent = mancanti.length
       ? `⚠️ Dati estratti, ma manca: ${mancanti.join(' e ')}. Completa il modulo.`
       : '✅ Dati estratti! Controlla il modulo e premi "Salva scadenza".';
-    st.textContent += aiDocPendente ? ' · 📎 Documento archiviato con la scadenza.' : ' · ⚠️ Documento troppo pesante: non verrà archiviato.';
+    const dup = trovaDuplicato({ categoria: cat ? cat.k : 'Altro', importo: imp, scadenza: isoValida(info.scadenza) ? info.scadenza : '', riferimento: info.riferimento, ente: info.ente, hash: aiDocPendente && aiDocPendente.hash });
+    if (dup) st.textContent = (dup.motivo === 'documento' ? `⛔ Questo documento è già inserito ("${dup.it.titolo}"): non verrà salvato di nuovo. ` : `⚠️ Esiste già una scadenza uguale ("${dup.it.titolo}"). `) + st.textContent;
+    st.textContent += aiDocPendente
+      ? (aiDocPendente.pdf ? ' · 📎 Documento archiviato con la scadenza.' : ' · ⚠️ Documento troppo pesante per l\'archivio: non verrà allegato.')
+      : ' · ⚠️ Documento non leggibile: non verrà archiviato.';
     mostraToast(st.textContent);
   } catch (err) {
     st.textContent = '❌ ' + err.message;
@@ -3339,6 +3361,9 @@ $('scadenzaForm').addEventListener('submit', async e => {
   if (!isoValida(d0)) { alert('Data di scadenza non valida.'); return; }
   const r = Number($('ricorrenza').value) || 0, n = quanteDaCreare();
   const imp = num2($('importo').value), titolo = $('titolo').value.trim();
+  const dup = trovaDuplicato({ categoria: cat, importo: imp, scadenza: d0, riferimento: $('riferimento').value.trim(), ente: $('ente').value.trim(), hash: aiDocPendente && aiDocPendente.hash });
+  if (dup && dup.motivo === 'documento') { alert(`Questo documento è già archiviato nella scadenza "${dup.it.titolo}". Non lo inserisco di nuovo.`); return; }
+  if (dup && !confirm(`Esiste già una scadenza uguale: "${dup.it.titolo}" da ${formatEuro(dup.it.importo)} del ${formatData(dup.it.scadenza)}.\n\nInserirla comunque?`)) return;
   const base = 'id_' + Date.now();
   let scadOrd = null, impOrd = null;
   if (cat === 'Verbali / Multe' && isoValida($('dataNotifica').value)) {
