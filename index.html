@@ -313,7 +313,16 @@
 <body>
 
 <!-- ================= LOGIN ================= -->
-<div id="loginScreen" class="login">
+<!-- All'apertura, finché Firebase non dice se l'accesso è salvato: niente modulo di login. -->
+<div id="avvioScreen" class="login">
+  <div class="login-box">
+    <div class="logo">€</div>
+    <h2>Scadenzario Personale</h2>
+    <p class="sub">Caricamento…</p>
+  </div>
+</div>
+
+<div id="loginScreen" class="login" hidden>
   <form id="loginForm" class="login-box" autocomplete="on">
     <div class="logo">€</div>
     <h2>Scadenzario Personale</h2>
@@ -929,7 +938,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v19';
+const VERSIONE = 'v20';
 const MINUTI_INATTIVITA = 15;
 const MODELLO_AI_DEFAULT = 'gemini-3.5-flash-lite';
 const MAX_MB_AI = 15;
@@ -1331,6 +1340,7 @@ auth.onAuthStateChanged(async user => {
 });
 
 function apriApp(user) {
+  $('avvioScreen').hidden = true;
   $('loginScreen').hidden = true;
   $('app').hidden = false;
   $('userEmail').textContent = user.email;
@@ -1355,6 +1365,7 @@ function apriApp(user) {
   blocca();
 }
 function chiudiApp() {
+  $('avvioScreen').hidden = true;
   $('bloccoScreen').hidden = true;
   if (dataRef) dataRef.off();
   if (connRef) connRef.off();
