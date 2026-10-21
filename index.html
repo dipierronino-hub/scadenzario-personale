@@ -331,6 +331,18 @@
   </form>
 </div>
 
+<!-- ================= BLOCCO CON IMPRONTA ================= -->
+<div id="bloccoScreen" class="login" hidden>
+  <div class="login-box">
+    <div class="logo">€</div>
+    <h2>Scadenzario Personale</h2>
+    <p class="sub">App bloccata</p>
+    <button type="button" id="btnSblocca" class="btn">🔒 Sblocca con impronta o PIN</button>
+    <button type="button" id="btnEsciBlocco" class="link-btn">Esci e accedi con la password</button>
+    <div id="bloccoFeedback" role="alert"></div>
+  </div>
+</div>
+
 <!-- ================= APP ================= -->
 <div id="app" hidden>
   <header class="top">
@@ -786,7 +798,9 @@
         <p style="margin:0 0 10px;">Collegato come <b id="userEmail"></b></p>
         <div class="row">
           <button class="btn btn-ghost" id="btnCambiaPwd">🔑 Cambia password (via email)</button>
+          <button class="btn btn-ghost" id="btnImpronta">🔒 Attiva sblocco con impronta o PIN</button>
         </div>
+        <p class="hint" id="improntaInfo"></p>
         <p class="hint">Per sicurezza l'app ti fa uscire dopo 15 minuti di inattività.</p>
       </div>
 
@@ -915,7 +929,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v17';
+const VERSIONE = 'v18';
 const MINUTI_INATTIVITA = 15;
 const MODELLO_AI_DEFAULT = 'gemini-3.5-flash-lite';
 const MAX_MB_AI = 15;
@@ -1227,6 +1241,82 @@ $('btnCambiaPwd').addEventListener('click', async () => {
 });
 $('btnLogout').addEventListener('click', () => auth.signOut());
 
+/* ---- Blocco con impronta o PIN del telefono ----
+   Usa WebAuthn con il sensore del telefono. La chiave resta solo su questo dispositivo:
+   nel browser si salva soltanto il suo identificativo, mai l'impronta. */
+const BLOCCO_DOPO_MS = 30000; // tornando all'app dopo 30 secondi si richiede di nuovo
+let bloccoNascostoDa = 0, sbloccoInCorso = false;
+const chiaveBlocco = () => auth.currentUser ? 'blocco_impronta_' + auth.currentUser.uid : null;
+const credImpronta = () => { const k = chiaveBlocco(); try { return k ? localStorage.getItem(k) : null; } catch (e) { return null; } };
+const inB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const daB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+function aggiornaImpronta() {
+  const on = !!credImpronta();
+  $('btnImpronta').textContent = on ? '🔓 Disattiva sblocco con impronta' : '🔒 Attiva sblocco con impronta o PIN';
+  $('improntaInfo').textContent = on
+    ? 'Sblocco con impronta attivo su questo dispositivo: all\'apertura l\'app chiede impronta o PIN.'
+    : 'Lo sblocco con impronta vale solo per il dispositivo su cui lo attivi.';
+}
+async function attivaImpronta() {
+  const u = auth.currentUser;
+  if (!u) return;
+  if (credImpronta()) {
+    if (!confirm('Disattivare lo sblocco con impronta su questo dispositivo?')) return;
+    localStorage.removeItem(chiaveBlocco()); aggiornaImpronta(); return;
+  }
+  const ok = window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
+    && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  if (!ok) { alert('Questo dispositivo o browser non supporta lo sblocco con impronta. Sul telefono usa Chrome.'); return; }
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: 'Scadenzario Personale' },
+      user: { id: new TextEncoder().encode(u.uid), name: u.email, displayName: u.email },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      attestation: 'none', timeout: 60000,
+    } });
+    localStorage.setItem(chiaveBlocco(), inB64(cred.rawId));
+    aggiornaImpronta();
+    alert('Fatto: da ora all\'apertura l\'app chiede impronta o PIN.');
+  } catch (e) {
+    alert('Attivazione non riuscita o annullata (' + e.message + ').');
+  }
+}
+function blocca() {
+  if (!credImpronta()) return;
+  $('bloccoFeedback').textContent = '';
+  $('bloccoScreen').hidden = false;
+  sblocca();
+}
+async function sblocca() {
+  const id = credImpronta();
+  if (!id) { $('bloccoScreen').hidden = true; return; }
+  if (sbloccoInCorso) return;
+  sbloccoInCorso = true;
+  try {
+    await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      allowCredentials: [{ type: 'public-key', id: daB64(id), transports: ['internal'] }],
+      userVerification: 'required', timeout: 60000,
+    } });
+    $('bloccoScreen').hidden = true;
+    resetIdle();
+  } catch (e) {
+    $('bloccoFeedback').textContent = 'Sblocco annullato o non riuscito: tocca il tasto per riprovare.';
+  } finally {
+    sbloccoInCorso = false;
+  }
+}
+$('btnImpronta').addEventListener('click', attivaImpronta);
+$('btnSblocca').addEventListener('click', sblocca);
+$('btnEsciBlocco').addEventListener('click', () => auth.signOut());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { bloccoNascostoDa = Date.now(); return; }
+  if (auth.currentUser && !sbloccoInCorso && Date.now() - bloccoNascostoDa > BLOCCO_DOPO_MS) blocca();
+});
+
 auth.onAuthStateChanged(async user => {
   if (!user) { chiudiApp(); return; }
   try {
@@ -1257,8 +1347,11 @@ function apriApp(user) {
     $('cloudDot').title = on ? 'Cloud collegato' : 'Offline: le modifiche verranno inviate al ritorno della connessione';
   });
   resetIdle();
+  aggiornaImpronta();
+  blocca();
 }
 function chiudiApp() {
+  $('bloccoScreen').hidden = true;
   if (dataRef) dataRef.off();
   if (connRef) connRef.off();
   if (cartaRef) cartaRef.off();
