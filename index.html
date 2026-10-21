@@ -808,6 +808,7 @@
         <div class="row">
           <button class="btn btn-ghost" id="btnCambiaPwd">🔑 Cambia password (via email)</button>
           <button class="btn btn-ghost" id="btnImpronta">🔒 Attiva sblocco con impronta o PIN</button>
+          <button class="btn btn-ghost" id="btnEsciAccount">🚪 Esci dall'account</button>
         </div>
         <p class="hint" id="improntaInfo"></p>
         <p class="hint">Per sicurezza l'app ti fa uscire dopo 15 minuti di inattività.</p>
@@ -938,7 +939,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v22';
+const VERSIONE = 'v23';
 document.getElementById('loginVer').textContent = VERSIONE;
 // La casella "Ricorda questo dispositivo" riparte com'era l'ultima volta (spuntata se c'è l'impronta).
 try { document.getElementById('loginRicorda').checked = localStorage.getItem('ricorda_dispositivo') === '1' || localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { /* storage non disponibile */ }
@@ -1254,7 +1255,11 @@ $('btnCambiaPwd').addEventListener('click', async () => {
   await inviaReset(auth.currentUser.email);
   alert('Ti ho inviato un\'email con il link per scegliere una nuova password.');
 });
-$('btnLogout').addEventListener('click', () => auth.signOut());
+// Con l'impronta attiva il tasto in alto blocca lo schermo; per scollegarsi c'è "Esci dall'account" in Gestione.
+$('btnLogout').addEventListener('click', () => { if (credImpronta()) blocca(false); else auth.signOut(); });
+$('btnEsciAccount').addEventListener('click', () => {
+  if (confirm('Uscire dall\'account? Al prossimo accesso servirà di nuovo email e password.')) auth.signOut();
+});
 
 /* ---- Blocco con impronta o PIN del telefono ----
    Usa WebAuthn con il sensore del telefono. La chiave resta solo su questo dispositivo:
@@ -1271,6 +1276,7 @@ const daB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
 function aggiornaImpronta() {
   const on = !!credImpronta();
+  aggiornaTastoUscita();
   $('btnImpronta').textContent = on ? '🔓 Disattiva sblocco con impronta' : '🔒 Attiva sblocco con impronta o PIN';
   $('improntaInfo').textContent = on
     ? 'Sblocco con impronta attivo su questo dispositivo: all\'apertura l\'app chiede solo impronta o PIN, senza password.'
@@ -1305,11 +1311,21 @@ async function attivaImpronta() {
     alert('Attivazione non riuscita o annullata (' + e.message + ').');
   }
 }
-function blocca() {
+const ICONA_ESCI = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 2.5v9"/><path d="M6.3 5.9a8.5 8.5 0 1 0 11.4 0"/></svg>';
+const ICONA_BLOCCA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+function aggiornaTastoUscita() {
+  const on = !!credImpronta();
+  const b = $('btnLogout');
+  b.innerHTML = on ? ICONA_BLOCCA : ICONA_ESCI;
+  b.title = on ? 'Blocca' : 'Esci';
+  b.setAttribute('aria-label', b.title);
+}
+// chiedi=false: blocco a mano, l'impronta si chiede solo quando si tocca "Sblocca".
+function blocca(chiedi = true) {
   if (!credImpronta()) return;
   $('bloccoFeedback').textContent = '';
   $('bloccoScreen').hidden = false;
-  sblocca();
+  if (chiedi) sblocca();
 }
 async function sblocca() {
   const id = credImpronta();
