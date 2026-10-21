@@ -326,7 +326,7 @@
   <form id="loginForm" class="login-box" autocomplete="on">
     <div class="logo">€</div>
     <h2>Scadenzario Personale</h2>
-    <p class="sub">Accesso riservato</p>
+    <p class="sub">Accesso riservato · <span id="loginVer"></span></p>
     <label>Email
       <input type="email" id="loginEmail" autocomplete="username" required>
     </label>
@@ -938,7 +938,10 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v20';
+const VERSIONE = 'v21';
+document.getElementById('loginVer').textContent = VERSIONE;
+// La casella "Ricorda questo dispositivo" riparte com'era l'ultima volta (spuntata se c'è l'impronta).
+try { document.getElementById('loginRicorda').checked = localStorage.getItem('ricorda_dispositivo') === '1' || localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { /* storage non disponibile */ }
 const MINUTI_INATTIVITA = 15;
 const MODELLO_AI_DEFAULT = 'gemini-3.5-flash-lite';
 const MAX_MB_AI = 15;
@@ -1227,7 +1230,10 @@ $('loginForm').addEventListener('submit', async e => {
   const btn = $('loginBtn');
   btn.disabled = true; loginMsg('');
   try {
-    const persist = $('loginRicorda').checked ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION;
+    // "Ricorda" spuntato o impronta attiva su questo telefono: l'accesso resta salvato.
+    const ricorda = $('loginRicorda').checked || improntaSulDispositivo();
+    try { localStorage.setItem('ricorda_dispositivo', ricorda ? '1' : '0'); } catch (e) { /* storage non disponibile */ }
+    const persist = ricorda ? firebase.auth.Auth.Persistence.LOCAL : firebase.auth.Auth.Persistence.SESSION;
     await auth.setPersistence(persist);
     await auth.signInWithEmailAndPassword($('loginEmail').value.trim(), $('loginPassword').value);
     $('loginPassword').value = '';
@@ -1257,6 +1263,9 @@ const BLOCCO_DOPO_MS = 30000; // tornando all'app dopo 30 secondi si richiede di
 let bloccoNascostoDa = 0, sbloccoInCorso = false;
 const chiaveBlocco = () => auth.currentUser ? 'blocco_impronta_' + auth.currentUser.uid : null;
 const credImpronta = () => { const k = chiaveBlocco(); try { return k ? localStorage.getItem(k) : null; } catch (e) { return null; } };
+// Segno sul dispositivo (senza utente): serve prima del login per ricordare l'accesso.
+const improntaSulDispositivo = () => { try { return localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { return false; } };
+const segnaImprontaDispositivo = on => { try { on ? localStorage.setItem('impronta_dispositivo', '1') : localStorage.removeItem('impronta_dispositivo'); } catch (e) { /* storage non disponibile */ } };
 const inB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const daB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
@@ -1272,7 +1281,7 @@ async function attivaImpronta() {
   if (!u) return;
   if (credImpronta()) {
     if (!confirm('Disattivare lo sblocco con impronta su questo dispositivo?')) return;
-    localStorage.removeItem(chiaveBlocco()); aggiornaImpronta(); return;
+    localStorage.removeItem(chiaveBlocco()); segnaImprontaDispositivo(false); aggiornaImpronta(); return;
   }
   const ok = window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
     && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
@@ -1287,6 +1296,7 @@ async function attivaImpronta() {
       attestation: 'none', timeout: 60000,
     } });
     localStorage.setItem(chiaveBlocco(), inB64(cred.rawId));
+    segnaImprontaDispositivo(true);
     // Resta collegato su questo dispositivo: alla prossima apertura basta l'impronta.
     await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     aggiornaImpronta();
@@ -1361,7 +1371,10 @@ function apriApp(user) {
   resetIdle();
   aggiornaImpronta();
   // Chi ha attivato l'impronta resta collegato: si apre con l'impronta, senza email e password.
-  if (credImpronta()) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+  if (credImpronta()) {
+    segnaImprontaDispositivo(true);
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+  }
   blocca();
 }
 function chiudiApp() {
