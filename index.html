@@ -938,7 +938,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v21';
+const VERSIONE = 'v22';
 document.getElementById('loginVer').textContent = VERSIONE;
 // La casella "Ricorda questo dispositivo" riparte com'era l'ultima volta (spuntata se c'è l'impronta).
 try { document.getElementById('loginRicorda').checked = localStorage.getItem('ricorda_dispositivo') === '1' || localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { /* storage non disponibile */ }
@@ -1341,10 +1341,14 @@ document.addEventListener('visibilitychange', () => {
 auth.onAuthStateChanged(async user => {
   if (!user) { chiudiApp(); return; }
   try {
-    const snap = await db.ref('utenti_autorizzati/' + user.uid).get();
+    // once() aspetta il collegamento al server: get() all'avvio a freddo può fallire con "Client is offline".
+    const snap = await db.ref('utenti_autorizzati/' + user.uid).once('value');
     if (snap.val() !== true) { await auth.signOut(); loginMsg('Questo account non è autorizzato ad accedere.'); return; }
   } catch (e) {
-    await auth.signOut(); loginMsg('Accesso negato dal server (' + e.message + ').'); return;
+    // Solo un rifiuto vero del server fa uscire: un problema di rete non deve cancellare l'accesso salvato.
+    if (/permission/i.test((e.code || '') + ' ' + e.message)) {
+      await auth.signOut(); loginMsg('Accesso negato dal server (' + e.message + ').'); return;
+    }
   }
   apriApp(user);
 });
