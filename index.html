@@ -929,7 +929,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v18';
+const VERSIONE = 'v19';
 const MINUTI_INATTIVITA = 15;
 const MODELLO_AI_DEFAULT = 'gemini-3.5-flash-lite';
 const MAX_MB_AI = 15;
@@ -1255,7 +1255,7 @@ function aggiornaImpronta() {
   const on = !!credImpronta();
   $('btnImpronta').textContent = on ? '🔓 Disattiva sblocco con impronta' : '🔒 Attiva sblocco con impronta o PIN';
   $('improntaInfo').textContent = on
-    ? 'Sblocco con impronta attivo su questo dispositivo: all\'apertura l\'app chiede impronta o PIN.'
+    ? 'Sblocco con impronta attivo su questo dispositivo: all\'apertura l\'app chiede solo impronta o PIN, senza password.'
     : 'Lo sblocco con impronta vale solo per il dispositivo su cui lo attivi.';
 }
 async function attivaImpronta() {
@@ -1278,6 +1278,8 @@ async function attivaImpronta() {
       attestation: 'none', timeout: 60000,
     } });
     localStorage.setItem(chiaveBlocco(), inB64(cred.rawId));
+    // Resta collegato su questo dispositivo: alla prossima apertura basta l'impronta.
+    await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     aggiornaImpronta();
     alert('Fatto: da ora all\'apertura l\'app chiede impronta o PIN.');
   } catch (e) {
@@ -1348,6 +1350,8 @@ function apriApp(user) {
   });
   resetIdle();
   aggiornaImpronta();
+  // Chi ha attivato l'impronta resta collegato: si apre con l'impronta, senza email e password.
+  if (credImpronta()) auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
   blocca();
 }
 function chiudiApp() {
@@ -1371,7 +1375,11 @@ function chiudiApp() {
 function resetIdle() {
   clearTimeout(idleTimer);
   if (!auth.currentUser) return;
-  idleTimer = setTimeout(() => { auth.signOut(); loginMsg('Sessione chiusa per inattività.'); }, MINUTI_INATTIVITA * 60000);
+  // Con l'impronta attiva l'inattività blocca lo schermo invece di far uscire.
+  idleTimer = setTimeout(() => {
+    if (credImpronta()) { blocca(); return; }
+    auth.signOut(); loginMsg('Sessione chiusa per inattività.');
+  }, MINUTI_INATTIVITA * 60000);
 }
 ['click', 'keydown', 'touchstart', 'scroll'].forEach(ev => document.addEventListener(ev, resetIdle, { passive: true }));
 
