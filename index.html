@@ -1159,7 +1159,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v24';
+const VERSIONE = 'v25';
 document.getElementById('loginVer').textContent = VERSIONE;
 // La casella "Ricorda questo dispositivo" riparte com'era l'ultima volta (spuntata se c'è l'impronta).
 try { document.getElementById('loginRicorda').checked = localStorage.getItem('ricorda_dispositivo') === '1' || localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { /* storage non disponibile */ }
@@ -2105,7 +2105,7 @@ const BANCHE_CARTA = {
   'posteitaliane.posteapp.appbpol': 'BancoPosta', 'posteitaliane.posteapp.apppostepay': 'Postepay',
   'com.fineco.it': 'Fineco', 'com.mediolanum.android.fullbanca': 'Banca Mediolanum',
   'com.revolut.revolut': 'Revolut', 'de.number26.android': 'N26', 'it.hype.app': 'Hype',
-  'com.google.android.apps.walletnfcrel': 'Google Wallet', 'com.google.android.gms': 'Google Wallet', 'manuale': 'Inserito a mano', 'com.samsung.android.spay': 'Samsung Wallet', 'com.paypal.android.p2pmobile': 'PayPal',
+  'com.google.android.apps.walletnfcrel': 'Google Wallet', 'com.google.android.gms': 'Google Wallet', 'manuale': 'Inserito a mano', 'contanti': 'Contanti', 'com.samsung.android.spay': 'Samsung Wallet', 'com.paypal.android.p2pmobile': 'PayPal',
   'com.bbva.italy': 'BBVA', 'com.americanexpress.android.acctsvcs.it': 'American Express', 'it.bppb.mobile': 'BPPB'
 };
 function listaCarta() {
