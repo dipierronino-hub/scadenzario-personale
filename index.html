@@ -1182,7 +1182,7 @@ const firebaseConfig = {
   appId: "1:172012013456:web:ef3534fd82c75f73201515"
 };
 
-const VERSIONE = 'v26';
+const VERSIONE = 'v27';
 document.getElementById('loginVer').textContent = VERSIONE;
 // La casella "Ricorda questo dispositivo" riparte com'era l'ultima volta (spuntata se c'è l'impronta).
 try { document.getElementById('loginRicorda').checked = localStorage.getItem('ricorda_dispositivo') === '1' || localStorage.getItem('impronta_dispositivo') === '1'; } catch (e) { /* storage non disponibile */ }
@@ -2264,6 +2264,12 @@ function vai(v) {
   window.scrollTo(0, 0);
 }
 document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => vai(b.dataset.view)));
+// Porta in vista l'elenco delle scadenze (sotto il promemoria), tenendo conto dell'intestazione fissa
+function scorriAElenco() {
+  const card = $('chipsStato').closest('.card'), h = document.querySelector('header.top');
+  const y = card.getBoundingClientRect().top + window.scrollY - (h ? h.offsetHeight : 0) - 8;
+  window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+}
 
 function mostraSub(s) {
   document.querySelectorAll('[data-sub]').forEach(x => x.classList.toggle('active', x.dataset.sub === s));
@@ -2311,7 +2317,7 @@ document.addEventListener('click', e => {
     case 'elimina': eliminaVoce(id); break;
     case 'cal': apriCalendario(id); break;
     case 'ricevuta': apriQuietanzaArchiviata(id); break;
-    case 'mostra-scadute': S.piano = 'TUTTI'; render(); impostaStato('scadute'); vai('scadenze'); break;
+    case 'mostra-scadute': S.piano = 'TUTTI'; render(); impostaStato('scadute'); vai('scadenze'); scorriAElenco(); break;
     case 'filtra-piano': S.piano = b.dataset.piano; S.sel.clear(); render(); break;
     case 'pick':
       chiudiModal('pickModal');
